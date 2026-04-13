@@ -1,0 +1,149 @@
+const express = require("express");
+const cors = require("cors");
+const app = express();
+require("dotenv").config();
+const { MongoClient, ServerApiVersion, ObjectId } = require("mongodb");
+const port = process.env.PORT || 3000;
+
+const admin = require("firebase-admin");
+
+const serviceAccount = require("./blood-aid-firebase-adminsdk.json");
+
+admin.initializeApp({
+  credential: admin.credential.cert(serviceAccount),
+});
+
+// middleware
+app.use(express.json());
+app.use(cors());
+
+const verifyFBToken = async (req, res, next) => {
+  const token = req.headers.authorization;
+
+  if (!token) {
+    return res.send(401).send({ message: "unauthorized access" });
+  }
+
+  try {
+    const idToken = token.split(" ")[1];
+    const decoded = await admin.auth().verifyIdToken(idToken);
+    req.decoded_email = decoded.email;
+    next();
+  } catch (error) {
+    return res.status(401).send({ message: "unauthorized access" });
+  }
+  next();
+};
+
+const uri = `mongodb+srv://${process.env.DB_USER}:${process.env.DB_PASS}@blood-aid.crhl5qx.mongodb.net/?appName=Blood-aid`;
+
+const client = new MongoClient(uri, {
+  serverApi: {
+    version: ServerApiVersion.v1,
+    strict: true,
+    deprecationErrors: true,
+  },
+});
+
+async function run() {
+  try {
+    // Connect the client to the server	(optional starting in v4.7)
+    await client.connect();
+
+    const db = client.db("blood-aid_db");
+    const bloodCollection = db.collection("bloods");
+    const userCollection = db.collection("users");
+    const volunteerCollection = db.collection("volunteer");
+
+    // users related api
+    app.post("/users", async (req, res) => {
+      const user = req.body;
+      user.role = "donar";
+      user.createAt = new Date();
+      const result = await userCollection.insertOne(user);
+      res.send(result);
+    });
+    app.get("/users/:email", async (req, res) => {
+      const email = req.params.email;
+      const query = { email: email };
+      const result = await userCollection.findOne(query);
+
+      if (result) {
+        res.send(result);
+      } else {
+        res.status(404).send({ message: "User not found" });
+      }
+    });
+    // bloods api
+    app.get("/bloods", async (req, res) => {
+      try {
+        let query = {};
+
+        if (req.query?.email) {
+          query = { requesterEmail: req.query.email };
+        }
+
+        const cursor = bloodCollection.find(query);
+        const result = await cursor.toArray();
+        res.send(result);
+      } catch (error) {
+        res.status(500).send({ message: "Forbidden access" });
+      }
+    });
+
+    app.post("/bloods", async (req, res) => {
+      const blood = req.body;
+      const result = await bloodCollection.insertOne(blood);
+      res.send(result);
+    });
+
+    app.delete("/bloods/:id", async (req, res) => {
+      const id = req.params.id;
+      const query = { _id: new ObjectId(id) };
+
+      const result = await bloodCollection.deleteOne(query);
+      res.send(result);
+    });
+    // volunteer related api
+    app.post("/volunteer", async (req, res) => {
+      const volunteer = req.body;
+
+      // 1. Email check kora (Jate ek-ই user bar bar request na pathate pare)
+      const query = { email: volunteer.email };
+      const existingRequest = await volunteerCollection.findOne(query);
+
+      if (existingRequest) {
+        return res
+          .status(400)
+          .send({ message: "Request already exists", insertedId: null });
+      }
+
+      // 2. Data prepare kora
+      const newVolunteer = {
+        ...volunteer,
+        status: "pending",
+        appliedAt: new Date(), 
+      };
+
+      const result = await volunteerCollection.insertOne(newVolunteer);
+      res.send(result);
+    });
+    // Send a ping to confirm a successful connection
+    await client.db("admin").command({ ping: 1 });
+    console.log(
+      "Pinged your deployment. You successfully connected to MongoDB!",
+    );
+  } finally {
+    // Ensures that the client will close when you finish/error
+    // await client.close();
+  }
+}
+run().catch(console.dir);
+
+app.get("/", (req, res) => {
+  res.send("Blood Donation server");
+});
+
+app.listen(port, () => {
+  console.log(`Example app listening on port ${port}`);
+});
