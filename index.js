@@ -32,7 +32,6 @@ const verifyFBToken = async (req, res, next) => {
   } catch (error) {
     return res.status(401).send({ message: "unauthorized access" });
   }
-  next();
 };
 
 const uri = `mongodb+srv://${process.env.DB_USER}:${process.env.DB_PASS}@blood-aid.crhl5qx.mongodb.net/?appName=Blood-aid`;
@@ -108,7 +107,6 @@ async function run() {
     app.post("/volunteer", async (req, res) => {
       const volunteer = req.body;
 
-      // 1. Email check kora (Jate ek-ই user bar bar request na pathate pare)
       const query = { email: volunteer.email };
       const existingRequest = await volunteerCollection.findOne(query);
 
@@ -122,11 +120,63 @@ async function run() {
       const newVolunteer = {
         ...volunteer,
         status: "pending",
-        appliedAt: new Date(), 
+        appliedAt: new Date(),
       };
 
       const result = await volunteerCollection.insertOne(newVolunteer);
       res.send(result);
+    });
+    app.get("/volunteer", async (req, res) => {
+      const query = {};
+      if (req.query.status) {
+        query.status = req.query.status;
+      }
+      const cursor = volunteerCollection.find(query);
+      const result = await cursor.toArray();
+      res.send(result);
+    });
+    app.patch("/volunteer/:id", async (req, res) => {
+      try {
+        const id = req.params.id;
+        const { status, email } = req.body;
+
+        
+        let query = { _id: new ObjectId(id) };
+        let result = await volunteerCollection.updateOne(query, {
+          $set: { status: status },
+        });
+
+        if (result.matchedCount === 0) {
+          query = { _id: id };
+          result = await volunteerCollection.updateOne(query, {
+            $set: { status: status },
+          });
+        }
+
+        
+        if (result.matchedCount > 0) {
+          let newRole = "";
+
+          if (status === "approve") {
+            newRole = "volunteer"; 
+          } else if (status === "block") {
+            newRole = "donar"; 
+          }
+
+          if (newRole) {
+            await volunteerCollection.updateOne(
+              { email: email },
+              { $set: { role: newRole } },
+            );
+            console.log(`User ${email} role changed to: ${newRole}`);
+          }
+        }
+
+        res.send(result);
+      } catch (error) {
+        console.error("Update Error:", error);
+        res.status(500).send({ message: "Internal Server Error" });
+      }
     });
     // Send a ping to confirm a successful connection
     await client.db("admin").command({ ping: 1 });
