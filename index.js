@@ -55,12 +55,63 @@ async function run() {
     const volunteerCollection = db.collection("volunteer");
 
     // users related api
+    app.get("/users", verifyFBToken, async (req, res) => {
+      const cursor = userCollection.find();
+      const result = await cursor.toArray();
+      res.send(result);
+    });
+   
+    app.get('/users/:email/role', async(req, res)=>{
+
+      const email = req.params.email;
+      const query = { email}
+      const user = await userCollection.findOne(query);
+      console.log(user)
+      res.send({role: user?.role || 'user'})
+
+    } )
     app.post("/users", async (req, res) => {
       const user = req.body;
       user.role = "donar";
       user.createAt = new Date();
+      user.status = "available";
       const result = await userCollection.insertOne(user);
       res.send(result);
+    });
+    app.patch("/users/status/:email", async (req, res) => {
+      const email = req.params.email;
+      const { status } = req.body;
+      const result = await userCollection.updateOne(
+        { email: email },
+        { $set: { status: status } },
+      );
+      res.send(result);
+    });
+   
+    app.patch("/users/update-role/:email", async (req, res) => {
+      try {
+        const email = req.params.email;
+        const { role } = req.body; 
+
+        const filter = { email: email };
+        const updatedDoc = {
+          $set: {
+            role: role,
+          },
+        };
+
+        const result = await userCollection.updateOne(filter, updatedDoc);
+
+        if (result.modifiedCount > 0) {
+          res.send(result);
+        } else {
+          res
+            .status(404)
+            .send({ message: "User not found or no changes made" });
+        }
+      } catch (error) {
+        res.status(500).send({ message: "Internal Server Error" });
+      }
     });
     app.get("/users/:email", async (req, res) => {
       const email = req.params.email;
@@ -95,6 +146,32 @@ async function run() {
       const result = await bloodCollection.insertOne(blood);
       res.send(result);
     });
+    // bloods status update API
+app.patch("/bloods/:id", async (req, res) => {
+  try {
+    const id = req.params.id;
+    const filter = { _id: new ObjectId(id) };
+    const updatedData = req.body; 
+    const updatedDoc = {
+      $set: {
+        status: updatedData.status,
+        
+        handler: updatedData.handler 
+      },
+    };
+
+    const result = await bloodCollection.updateOne(filter, updatedDoc);
+
+    if (result.modifiedCount > 0) {
+      res.send(result);
+    } else {
+      res.status(404).send({ message: "Request not found or no changes made" });
+    }
+  } catch (error) {
+    console.error("Blood Patch Error:", error);
+    res.status(500).send({ message: "Internal Server Error" });
+  }
+});
 
     app.delete("/bloods/:id", async (req, res) => {
       const id = req.params.id;
@@ -116,7 +193,6 @@ async function run() {
           .send({ message: "Request already exists", insertedId: null });
       }
 
-      // 2. Data prepare kora
       const newVolunteer = {
         ...volunteer,
         status: "pending",
@@ -140,7 +216,6 @@ async function run() {
         const id = req.params.id;
         const { status, email } = req.body;
 
-        
         let query = { _id: new ObjectId(id) };
         let result = await volunteerCollection.updateOne(query, {
           $set: { status: status },
@@ -153,14 +228,13 @@ async function run() {
           });
         }
 
-        
         if (result.matchedCount > 0) {
           let newRole = "";
 
           if (status === "approve") {
-            newRole = "volunteer"; 
+            newRole = "volunteer";
           } else if (status === "block") {
-            newRole = "donar"; 
+            newRole = "donar";
           }
 
           if (newRole) {
