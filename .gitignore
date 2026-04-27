@@ -1,3 +1,4 @@
 node_modules
 .env
 blood-aid-firebase-adminsdk.json
+.vercel
